@@ -1,0 +1,485 @@
+% Copyright (C) 2024 Nicholas Fleischhauer
+%
+% This notes template is free software: you can redistribute it and/or modify
+% it under the terms of the GNU General Public License as published by
+% the Free Software Foundation, either version 3 of the License, or
+% (at your option) any later version.
+%
+% This template is distributed in the hope that it will be useful,
+% but WITHOUT ANY WARRANTY; without even the implied warranty of
+% MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+% GNU General Public License for more details.
+%
+% You should have received a copy of the GNU General Public License
+% along with this template. If not, see <https://www.gnu.org/licenses/>.
+
+\documentclass[11pt, a4paper, oneside]{article}
+
+\title{Notes: L-BFGS and Second-Order Optimization Methods}
+\author{Nicholas Fleischhauer}
+\date{\today}
+
+\usepackage[T1]{fontenc}
+
+% Encoding and language support
+\usepackage[utf8]{inputenc}
+\usepackage[english]{babel}
+
+% Mathematical packages
+\usepackage{amsmath, amssymb, amsthm}
+
+% Graphics, tables, and layout
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage[inner=1.5cm, outer=1.5cm, top=2.5cm, bottom=2.5cm]{geometry}
+\graphicspath{{assets/}}
+
+% TikZ for creating diagrams
+\usepackage{tikz}
+\usetikzlibrary{positioning}
+
+% Algorithms
+\usepackage{algorithm, algpseudocode}
+
+% Colors and fancy text
+\usepackage[dvipsnames, svgnames, table]{xcolor}
+\usepackage{fancyhdr}
+
+\setlength{\headheight}{13.6pt}
+
+% Custom colors
+\definecolor{darkblue}{rgb}{0,0,.6}
+\definecolor{darkred}{rgb}{.7,0,0}
+\definecolor{darkgreen}{rgb}{0,.6,0}
+\definecolor{red}{rgb}{.98,0,0}
+\definecolor{OliveGreen}{cmyk}{0.64,0,0.95,0.40}
+\definecolor{CadetBlue}{cmyk}{0.62,0.57,0.23,0}
+\definecolor{lightlightgray}{gray}{0.93}
+
+% Page footer management
+\usepackage{lastpage}
+
+% For code blocks (minted - requires pygments)
+\usepackage{minted}
+
+% Quote handling (loaded after minted to avoid warnings)
+\usepackage{csquotes}
+
+% Alternative code listing package (listings)
+\usepackage{listings}
+
+% Bibliography management
+\usepackage[backend=biber, style=authoryear, citestyle=authoryear]{biblatex}
+\addbibresource{references.bib} % Replace with your actual .bib file name
+\lstset{
+  language=Python,
+  basicstyle=\ttfamily\small,
+  keywordstyle=\color{OliveGreen},
+  commentstyle=\color{gray},
+  numbers=left,
+  numberstyle=\tiny,
+  stepnumber=1,
+  numbersep=5pt,
+  backgroundcolor=\color{lightlightgray},
+  frame=none,
+  tabsize=2,
+  captionpos=t,
+  breaklines=true,
+  showspaces=false,
+  showstringspaces=false,
+  showtabs=false,
+  columns=flexible,
+  morecomment=[l][\color{magenta}]{\#},
+  morekeywords={__global__, __device__},
+  upquote=true,
+  keepspaces=true
+}
+
+% For paragraph formatting
+\usepackage{parskip}
+\setlength{\parskip}{10pt plus 1pt minus 1pt}
+
+% Hyperlinks
+\usepackage{hyperref}
+\hypersetup{
+    pdfauthor={Nicholas Fleischhauer},
+    pdftitle={Notes: L-BFGS and Second-Order Optimization Methods},
+    pdfsubject={Notes},
+    pdfkeywords={Notes, LaTeX, Optimization, L-BFGS, Machine Learning},
+    pdfproducer={GNU General Public License v3.0 or later, see https://www.gnu.org/licenses/gpl-3.0.en.html},
+    colorlinks=true,
+    linkcolor=darkred,
+    filecolor=magenta,
+    urlcolor=darkblue,
+    citecolor=darkblue,
+    bookmarksnumbered=true,
+    plainpages=false
+}
+
+% Verbatim and special text environments
+\usepackage{verbatim, fancyvrb}
+\VerbatimFootnotes
+
+% Page header and footer style
+\pagestyle{fancy}
+\fancyhf{}
+\lhead{Nicholas Fleischhauer}
+\rhead{\today}
+\fancyfoot[C]{\scriptsize Page \thepage\ of \pageref*{LastPage} \textbar{} Licensed under the GNU GPL v3.0 or later}
+
+% Custom mathematical commands
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\F}{\mathbb{F}}
+\newcommand{\LL}{\mathcal{L}}
+\newcommand{\C}{\mathbb{C}}
+\newcommand{\spn}{\operatorname{span}}
+\newcommand{\nll}{\operatorname{null}}
+\newcommand{\range}{\operatorname{range}}
+
+% Theorems and definitions
+\newtheorem{theorem}{Theorem}
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{proposition}[theorem]{Proposition}
+\newtheorem{corollary}[theorem]{Corollary}
+\newtheorem{definition}[theorem]{Definition}
+\newtheorem{example}[theorem]{Example}
+\newtheorem{exercise}[theorem]{Exercise}
+\newtheorem{remark}[theorem]{Remark}
+
+\begin{document}
+
+\maketitle
+
+\section{Overview}
+
+This document explores the mathematical foundations of second-order optimization methods, with a particular focus on the Limited-memory Broyden--Fletcher--Goldfarb--Shanno (L-BFGS) algorithm. We compare first-order methods (gradient descent and stochastic gradient descent) with second-order methods (Newton's method and L-BFGS), examining how curvature information accelerates convergence and why certain regularization techniques are incompatible with quasi-Newton methods.
+
+\section{Key Concepts}
+
+\subsection{Newton's Method vs. Gradient Descent}
+
+\subsubsection{Newton's Method (Full)}
+
+Newton's method uses the \textbf{second-order Taylor approximation} to find the optimal parameter update:
+
+\begin{equation}
+\theta_{t+1} = \theta_t - H^{-1} \nabla f(\theta_t)
+\end{equation}
+
+where:
+\begin{itemize}
+    \item $\nabla f(\theta_t)$ is the gradient (first derivative)---the direction of steepest ascent
+    \item $H$ is the \textbf{Hessian matrix} (matrix of second derivatives)---encodes curvature information
+    \item $H^{-1}$ is the inverse Hessian matrix
+\end{itemize}
+
+\begin{definition}[Hessian Matrix]
+For a function $f: \R^n \to \R$, the Hessian matrix $H \in \R^{n \times n}$ is defined as:
+\[
+H_{ij} = \frac{\partial^2 f}{\partial \theta_i \partial \theta_j}
+\]
+\end{definition}
+
+\textbf{Key insight}: The Hessian tells you not just which direction to go (gradient), but also \textbf{how the gradient itself is changing} (curvature). This allows for much smarter step sizes and adaptive scaling in different directions.
+
+\subsubsection{Gradient Descent}
+
+Gradient descent uses only first-order information:
+
+\begin{equation}
+\theta_{t+1} = \theta_t - \alpha \nabla f(\theta_t)
+\end{equation}
+
+where $\alpha$ is the learning rate (step size).
+
+\textbf{Key limitation}: Only uses first-order information (gradient). It's analogous to walking down a hill blindfolded---you can feel the slope, but you don't know if the terrain is about to flatten out or get steeper.
+
+\subsection{Why GD/SGD Don't Use Curvature}
+
+\textbf{No, they don't!} This is the crucial difference:
+
+\begin{itemize}
+    \item \textbf{GD/SGD}: Only compute $\nabla f$ (first derivatives)---$O(n)$ complexity per iteration
+    \item \textbf{Newton's Method}: Computes both $\nabla f$ and $H$ (second derivatives)---$O(n^2)$ to compute the Hessian, $O(n^3)$ to invert it
+\end{itemize}
+
+This is why Newton's method converges in far fewer iterations but becomes prohibitively expensive for high-dimensional problems (e.g., deep neural networks with millions of parameters).
+
+\section{The L-BFGS Algorithm}
+
+\subsection{The Problem with Full Newton's Method}
+
+For $n$ parameters:
+\begin{itemize}
+    \item Hessian $H$ is an $n \times n$ matrix
+    \item For 10,000 parameters: 100 million entries!
+    \item Computing the Hessian: $O(n^2)$ storage, $O(n^2)$ computation
+    \item Inverting the Hessian: $O(n^3)$ operations
+\end{itemize}
+
+This becomes computationally infeasible for modern machine learning applications.
+
+\subsection{The Solution: L-BFGS}
+
+Instead of storing and computing the full Hessian, L-BFGS:
+
+\begin{enumerate}
+    \item \textbf{Stores only the last $m$ gradient differences and parameter differences} (typically $m = 5$ to $20$)
+    \item Uses these vectors to \textbf{implicitly approximate} $H^{-1} \nabla f$ without ever forming $H$ or $H^{-1}$ explicitly
+\end{enumerate}
+
+\subsection{The Mathematical Foundation}
+
+L-BFGS maintains two sets of vectors from recent iterations:
+
+\begin{align}
+s_k &= \theta_{k+1} - \theta_k \quad \text{(change in parameters)} \\
+y_k &= \nabla f(\theta_{k+1}) - \nabla f(\theta_k) \quad \text{(change in gradients)}
+\end{align}
+
+For the last $m$ iterations, we store the pairs: $(s_0, y_0), (s_1, y_1), \ldots, (s_{m-1}, y_{m-1})$
+
+\textbf{Storage requirement}: $2m \times n$ scalars instead of $n^2$ (massive reduction!)
+
+\begin{example}[Storage Comparison]
+For $n = 10{,}000$ parameters and $m = 10$ history:
+\begin{itemize}
+    \item Full Hessian: $10{,}000^2 = 100{,}000{,}000$ entries
+    \item L-BFGS: $2 \times 10 \times 10{,}000 = 200{,}000$ entries
+    \item \textbf{Reduction factor}: 500$\times$ less memory!
+\end{itemize}
+\end{example}
+
+\subsection{Two-Loop Recursion Algorithm}
+
+This is the core computational engine of L-BFGS. It computes the search direction $d = -H^{-1} \nabla f$ using only the stored vector pairs.
+
+\begin{algorithm}[H]
+\caption{L-BFGS Two-Loop Recursion}
+\label{alg:lbfgs}
+\begin{algorithmic}[1]
+\State \textbf{Input:} Current gradient $\nabla f(\theta)$, stored pairs $(s_i, y_i)$ for $i = 0, \ldots, m-1$
+\State \textbf{Output:} Search direction $d$
+\State
+\State $q \gets \nabla f(\theta)$
+\State
+\Comment{First loop: backward pass}
+\For{$i = m-1, m-2, \ldots, 0$}
+    \State $\alpha_i \gets \frac{s_i^\top q}{y_i^\top s_i}$
+    \State $q \gets q - \alpha_i y_i$
+\EndFor
+\State
+\State $r \gets H_0^{-1} q$ \Comment{Initial Hessian approximation (often identity)}
+\State
+\Comment{Second loop: forward pass}
+\For{$i = 0, 1, \ldots, m-1$}
+    \State $\beta \gets \frac{y_i^\top r}{y_i^\top s_i}$
+    \State $r \gets r + s_i (\alpha_i - \beta)$
+\EndFor
+\State
+\State \Return $d = -r$ \Comment{Search direction}
+\end{algorithmic}
+\end{algorithm}
+
+\textbf{Complexity Analysis}:
+\begin{itemize}
+    \item \textbf{Space complexity}: $O(mn)$ instead of $O(n^2)$
+    \item \textbf{Time complexity per iteration}: $O(mn)$ instead of $O(n^3)$
+\end{itemize}
+
+\subsection{Why This Works: The Secant Condition}
+
+The BFGS update formula builds up an approximation $B_k \approx H$ (or its inverse) using the \textbf{secant condition}:
+
+\begin{equation}
+B_{k+1} s_k = y_k
+\end{equation}
+
+This condition states: ``The approximate Hessian times the change in parameters should equal the change in gradients.''
+
+This is derived from the mean value theorem applied to the gradient:
+
+\begin{equation}
+\nabla f(\theta_{k+1}) - \nabla f(\theta_k) \approx H(\theta_k)(\theta_{k+1} - \theta_k)
+\end{equation}
+
+Rearranging:
+\begin{equation}
+y_k \approx H \cdot s_k
+\end{equation}
+
+The secant condition ensures that our Hessian approximation is consistent with the observed changes in the gradient along the optimization trajectory.
+
+\section{Convergence Analysis}
+
+\subsection{Geometric Intuition}
+
+Consider optimizing a function with an elongated valley (high condition number, such as a poorly conditioned quadratic):
+
+\textbf{Gradient Descent}:
+\begin{itemize}
+    \item Sees steep gradient perpendicular to the valley
+    \item Takes a step perpendicular to the valley, overshoots
+    \item Zigzags back and forth across the valley (thousands of iterations)
+\end{itemize}
+
+\textbf{L-BFGS}:
+\begin{itemize}
+    \item Curvature information reveals: ``steep in this direction, flat in that direction''
+    \item Takes a \textbf{preconditioned step}---small in steep directions, large in flat directions
+    \item Directly moves down the valley axis (tens of iterations)
+\end{itemize}
+
+\subsection{Convergence Rates}
+
+The convergence rate depends critically on the \textbf{condition number} $\kappa = \lambda_{\max}/\lambda_{\min}$ of the Hessian, where $\lambda_{\max}$ and $\lambda_{\min}$ are the largest and smallest eigenvalues, respectively.
+
+\begin{theorem}[Convergence Rates]
+For strongly convex functions:
+\begin{itemize}
+    \item \textbf{Gradient Descent}: Linear convergence with rate depending on $\kappa$
+    \[
+    \|\theta_t - \theta^*\| \leq \left(\frac{\kappa - 1}{\kappa + 1}\right)^t \|\theta_0 - \theta^*\|
+    \]
+    Number of iterations: $O(\kappa \log(1/\epsilon))$ to achieve $\epsilon$ accuracy
+    
+    \item \textbf{Newton's Method / L-BFGS}: Superlinear to quadratic convergence
+    \[
+    \|\theta_{t+1} - \theta^*\| \leq C \|\theta_t - \theta^*\|^2
+    \]
+    Number of iterations: $O(\log \log(1/\epsilon))$ to achieve $\epsilon$ accuracy
+\end{itemize}
+\end{theorem}
+
+For poorly conditioned problems (large $\kappa$), the difference is dramatic:
+\begin{itemize}
+    \item $\kappa = 1000$: GD needs $\sim$1000$\times$ more iterations
+    \item L-BFGS convergence is nearly independent of $\kappa$
+\end{itemize}
+
+\section{Why L-BFGS Cannot Handle L1 Regularization}
+
+\subsection{The Problem with L1}
+
+Consider \textbf{L1 regularization} (Lasso):
+\begin{equation}
+f(\theta) = \text{loss}(\theta) + \lambda \|\theta\|_1 = \text{loss}(\theta) + \lambda \sum_{i=1}^n |\theta_i|
+\end{equation}
+
+The critical issue: \textbf{The L1 norm is not differentiable at zero}.
+
+\begin{equation}
+\frac{\partial |\theta|}{\partial \theta} = \begin{cases}
++1 & \text{if } \theta > 0 \\
+-1 & \text{if } \theta < 0 \\
+\text{undefined} & \text{if } \theta = 0
+\end{cases}
+\end{equation}
+
+\subsection{Why L-BFGS Specifically Fails}
+
+\begin{enumerate}
+    \item \textbf{L-BFGS assumes smoothness}: The entire BFGS approximation relies on the objective function being twice continuously differentiable ($C^2$). The secant condition $B_k s_k = y_k$ assumes gradients change smoothly along the optimization path.
+    
+    \item \textbf{Kinks break the Hessian approximation}: At $\theta = 0$, the gradient has a discontinuous jump (from $-1$ to $+1$, or vice versa). The Hessian approximation becomes invalid at these non-smooth points.
+    
+    \item \textbf{Cannot identify exact zeros}: L1 regularization drives coefficients to \textbf{exactly zero} (inducing sparsity), which is its key feature. L-BFGS will approach zero asymptotically but won't hit it exactly because it relies on smooth curvature information.
+    
+    \item \textbf{Subgradients are insufficient}: While we could use subgradients, the secant condition $B_k s_k = y_k$ loses its theoretical justification when $y_k$ contains arbitrary subgradient selections rather than true gradients.
+\end{enumerate}
+
+\subsection{What Works Instead: Proximal Methods}
+
+For non-smooth regularizers like L1, we use \textbf{proximal gradient methods} (implemented in solvers like SAGA):
+
+\begin{equation}
+\theta_{t+1} = \text{prox}_{\lambda\|\cdot\|_1}\left(\theta_t - \alpha \nabla \text{loss}(\theta_t)\right)
+\end{equation}
+
+where the proximal operator for L1 regularization is \textbf{soft thresholding}:
+
+\begin{equation}
+\text{prox}_{\lambda|\theta|}(\theta) = \operatorname{sign}(\theta) \max(|\theta| - \lambda, 0) = \begin{cases}
+\theta - \lambda & \text{if } \theta > \lambda \\
+0 & \text{if } |\theta| \leq \lambda \\
+\theta + \lambda & \text{if } \theta < -\lambda
+\end{cases}
+\end{equation}
+
+This approach explicitly separates:
+\begin{itemize}
+    \item The \textbf{smooth} differentiable loss term (handled by gradient descent)
+    \item The \textbf{non-smooth} L1 regularizer (handled by the proximal operator)
+\end{itemize}
+
+\begin{remark}[L2 Regularization]
+In contrast, L2 regularization (Ridge) is perfectly compatible with L-BFGS because:
+\[
+f(\theta) = \text{loss}(\theta) + \lambda \|\theta\|_2^2
+\]
+is smooth and twice differentiable everywhere. The gradient is:
+\[
+\nabla f(\theta) = \nabla \text{loss}(\theta) + 2\lambda \theta
+\]
+which is continuous and differentiable.
+\end{remark}
+
+\section{Summary: The Core Advantages of L-BFGS}
+
+The computational efficiency and rapid convergence of L-BFGS stem from:
+
+\begin{enumerate}
+    \item \textbf{Using curvature information}: Exploits second-order (Hessian) information that first-order methods (GD/SGD) completely ignore
+    
+    \item \textbf{Implicit Hessian representation}: Stores the inverse Hessian implicitly using only $m$ vector pairs, avoiding $O(n^2)$ storage and $O(n^3)$ inversion
+    
+    \item \textbf{Two-loop recursion}: Computes the search direction in $O(mn)$ time through clever recursive application of stored vector pairs
+    
+    \item \textbf{Superlinear convergence}: Steps naturally adapt to the loss surface geometry, achieving convergence rates nearly independent of the condition number
+    
+    \item \textbf{No learning rate tuning}: Unlike gradient descent, L-BFGS uses line search to automatically determine step sizes
+\end{enumerate}
+
+\textbf{Critical limitation}: Requires smooth, twice-differentiable objective functions, which is why non-smooth regularizers (L1, elastic net) break the algorithm and require specialized proximal methods.
+
+\section{Notes and Observations}
+
+\subsection{When to Use L-BFGS}
+
+L-BFGS is ideal for:
+\begin{itemize}
+    \item Medium-scale problems (thousands to millions of parameters)
+    \item Smooth, well-conditioned objective functions
+    \item Problems where gradient computation is expensive (fewer iterations matter)
+    \item L2-regularized models (Ridge regression, logistic regression)
+\end{itemize}
+
+\subsection{When NOT to Use L-BFGS}
+
+Avoid L-BFGS for:
+\begin{itemize}
+    \item Very large-scale problems (deep learning with billions of parameters)---storage of $m$ vector pairs becomes prohibitive
+    \item Non-smooth objectives (L1 regularization, hinge loss, etc.)
+    \item Stochastic objectives where gradients are noisy (use SGD variants instead)
+    \item Problems requiring online learning or streaming data
+\end{itemize}
+
+\subsection{Practical Considerations}
+
+\begin{itemize}
+    \item \textbf{History size $m$}: Typical values are 5--20. Larger $m$ improves approximation but increases computation and memory
+    \item \textbf{Initial Hessian $H_0$}: Often set to identity or scaled identity based on recent $s$ and $y$ pairs
+    \item \textbf{Line search}: L-BFGS requires a line search (e.g., Wolfe conditions) to ensure sufficient decrease and curvature conditions
+\end{itemize}
+
+\section{References}
+
+\begin{itemize}
+    \item Nocedal, J., \& Wright, S. J. (2006). \textit{Numerical Optimization} (2nd ed.). Springer.
+    \item Liu, D. C., \& Nocedal, J. (1989). On the limited memory BFGS method for large scale optimization. \textit{Mathematical Programming}, 45(1-3), 503--528.
+    \item Parikh, N., \& Boyd, S. (2014). Proximal algorithms. \textit{Foundations and Trends in Optimization}, 1(3), 127--239.
+\end{itemize}
+
+\end{document}
+
+
